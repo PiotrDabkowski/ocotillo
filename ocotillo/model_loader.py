@@ -5,26 +5,19 @@ import torch
 from transformers import Wav2Vec2ForCTC, Wav2Vec2FeatureExtractor, Wav2Vec2CTCTokenizer, Wav2Vec2Processor
 
 
-def load_model(device, phonetic=False, use_torchscript=False):
+def load_model(device, basis_model="jbetker/wav2vec2-large-robust-ft-libritts-voxpopuli", tokenizer='jbetker/tacotron-symbols', ckpt=None):
     """
     Utility function to load the model and corresponding processor to the specified device. Supports loading
     torchscript models when they have been pre-built (which is accomplished by running this file.)
     """
-    model_name = "facebook/wav2vec2-lv-60-espeak-cv-ft" if phonetic else "jbetker/wav2vec2-large-robust-ft-libritts-voxpopuli"
-    if use_torchscript:
-        model = trace_torchscript_model(model_name.split('/')[-1].replace('-', '_'), 'cuda' if 'cuda' in device else 'cpu')
-        model = model.to(device)
-    else:
-        model = Wav2Vec2ForCTC.from_pretrained(model_name).to(device)
-        model.config.return_dict = False
-        model.eval()
-    if phonetic:
-        processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-lv-60-espeak-cv-ft")
-    else:
-        feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(f"facebook/wav2vec2-large-960h")
-        tokenizer = Wav2Vec2CTCTokenizer.from_pretrained('jbetker/tacotron-symbols')
-        processor = Wav2Vec2Processor(feature_extractor, tokenizer)
-    return model, processor
+    model = Wav2Vec2ForCTC.from_pretrained(basis_model)
+    if ckpt is not None:
+        model.load_state_dict(torch.load(ckpt, map_location="cpu"))
+    model = model.to(device)
+    model.config.return_dict = False
+    model.eval()
+    tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(tokenizer)
+    return model, tokenizer
 
 
 def trace_torchscript_model(model_name, dev_type='cpu', load_from_cache=True):
