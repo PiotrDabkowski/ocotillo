@@ -106,12 +106,12 @@ class Transcriber:
 
 
 if __name__ == '__main__':
-    transcriber = Transcriber()
+    transcriber = Transcriber(tokenizer="ascii")
     audio = load_audio('../data/obama.mp3', 44100)
     audio = audio.unsqueeze(0).unsqueeze(0)
 
     text, logits_btc = (transcriber.transcribe_batch(torch.cat([audio, ], dim=0), 44100))
-    print(text)
+    print(text[0])
     # Now dump the alignment to textgrid, it can be easily viewed via praat.
     import textgrid
     grid = textgrid.TextGrid()

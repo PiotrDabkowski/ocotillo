@@ -3,9 +3,11 @@ from time import time
 
 import torch
 from transformers import Wav2Vec2ForCTC, Wav2Vec2FeatureExtractor, Wav2Vec2CTCTokenizer, Wav2Vec2Processor
+import os
 
 
-def load_model(device, basis_model="jbetker/wav2vec2-large-robust-ft-libritts-voxpopuli", tokenizer='jbetker/tacotron-symbols', ckpt=None):
+def load_model(device, basis_model="jbetker/wav2vec2-large-robust-ft-libritts-voxpopuli",
+               tokenizer='jbetker/tacotron-symbols', ckpt=None):
     """
     Utility function to load the model and corresponding processor to the specified device. Supports loading
     torchscript models when they have been pre-built (which is accomplished by running this file.)
@@ -16,7 +18,11 @@ def load_model(device, basis_model="jbetker/wav2vec2-large-robust-ft-libritts-vo
     model = model.to(device)
     model.config.return_dict = False
     model.eval()
-    tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(tokenizer)
+    if tokenizer == "ascii":
+        tokenizer = Wav2Vec2CTCTokenizer(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ascii_vocab.json"),
+                                         word_delimiter_token=" ")
+    else:
+        tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(tokenizer)
     return model, tokenizer
 
 
@@ -28,7 +34,7 @@ def trace_torchscript_model(model_name, dev_type='cpu', load_from_cache=True):
     print("Model hasn't been traced. Doing so now.")
     model, extractor = load_model(dev_type, use_torchscript=False)
     with torch.autocast(dev_type) and torch.no_grad():
-        traced_model = torch.jit.trace(model, (torch.randn((1,16000), device=dev_type)))
+        traced_model = torch.jit.trace(model, (torch.randn((1, 16000), device=dev_type)))
     os.makedirs('torchscript', exist_ok=True)
     torch.jit.save(traced_model, output_trace_cache_file)
     print("Done tracing.")
@@ -37,12 +43,14 @@ def trace_torchscript_model(model_name, dev_type='cpu', load_from_cache=True):
 
 def trace_onnx_model(dev_type='cpu'):
     model, extractor = load_model(dev_type, use_torchscript=False)
-    torch.onnx.export(model, torch.randn((2,16000), device=dev_type), 'ocotillo.onnx', export_params=True, opset_version=13,
+    torch.onnx.export(model, torch.randn((2, 16000), device=dev_type), 'ocotillo.onnx', export_params=True,
+                      opset_version=13,
                       do_constant_folding=True, input_names=['input'], output_names=['logits'],
-                      dynamic_axes={'input': {0: 'batch_size', 1: 'input_length'}, 'output': {0: 'batch_size', 1: 'sequence_length'}})
+                      dynamic_axes={'input': {0: 'batch_size', 1: 'input_length'},
+                                    'output': {0: 'batch_size', 1: 'sequence_length'}})
 
 
-def test_onnx_model():
+def onnx_model():
     # Test whether the model can be loaded and use the ONNX checker.
     import onnx
     model = onnx.load("ocotillo.onnx")
@@ -60,7 +68,7 @@ def test_onnx_model():
         start = time()
         for k in tqdm(range(100)):
             logits = torch_model(audio_norm)[0]
-        print(f'Elapsed torchscript: {time()-start}')
+        print(f'Elapsed torchscript: {time() - start}')
         tokens = torch.argmax(logits, dim=-1)
 
         onnx_inputs = {'input': audio_norm.numpy()}
