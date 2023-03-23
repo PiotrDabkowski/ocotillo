@@ -8,12 +8,12 @@ from ocotillo.utils import load_audio
 
 
 class Transcriber:
-    def __init__(self, cuda_device=-1, basis_model="jbetker/wav2vec2-large-robust-ft-libritts-voxpopuli", tokenizer='jbetker/tacotron-symbols', ckpt=None):
+    def __init__(self, phonetic=False, cuda_device=-1, use_torchscript=False):
         if cuda_device >= 0:
             self.device = f'cuda:{cuda_device}'
         else:
             self.device = 'cpu'
-        self.model, self.tokenizer = load_model(self.device, basis_model=basis_model, tokenizer=tokenizer, ckpt=ckpt)
+        self.model, self.processor = load_model(self.device, phonetic=phonetic, use_torchscript=use_torchscript)
         self.model.eval()
 
     def transcribe_batch(self, wave_b1t, sample_rate):
@@ -21,7 +21,7 @@ class Transcriber:
         with torch.no_grad():
             logits_btc = self.model(wave_b1t.squeeze(1))[0]
             tokens = torch.argmax(logits_btc, dim=-1)
-        return self.tokenizer.batch_decode(tokens), logits_btc
+        return self.processor.batch_decode(tokens), logits_btc
 
     def _prepare_wave(self, wave_b1t, sample_rate):
         assert len(wave_b1t.shape) == 3, wave_b1t.shape
@@ -82,19 +82,19 @@ class Transcriber:
                     last_logits = logits_chunk_btc[:, logits_overlap_sz:]
         logit_chunks.append(last_logits)
         logits_btc = torch.cat(logit_chunks, dim=1)
-        return self.batch_decode(torch.argmax(logits_btc, dim=-1)), logits_btc
+        return self.processor.batch_decode(torch.argmax(logits_btc, dim=-1)), logits_btc
 
     def logits_to_text_with_timings(self, logits_tc):
         """
         Returns text and the start time for each character in text. The timings are quite accurate.
         """
         tokens = torch.argmax(logits_tc, dim=-1).detach().cpu()
-        str_tokens = self.tokenizer.convert_ids_to_tokens(tokens, skip_special_tokens=False)
+        str_tokens = self.processor.tokenizer.convert_ids_to_tokens(tokens, skip_special_tokens=False)
         result = []
         result_timings = []
         seen_pad = False
         for i, token in enumerate(str_tokens):
-            if token == self.tokenizer.pad_token:
+            if token == self.processor.tokenizer.pad_token:
                 seen_pad = True
                 continue
             if not result or result[-1] != token or seen_pad:
@@ -102,16 +102,16 @@ class Transcriber:
                 assert len(token) == 1, token
                 result.append(token)
                 result_timings.append(i / 50.0)
-        return "".join(result).replace(self.tokenizer.word_delimiter_token, " "), result_timings
+        return "".join(result).replace(self.processor.tokenizer.word_delimiter_token, " "), result_timings
 
 
 if __name__ == '__main__':
-    transcriber = Transcriber(tokenizer="ascii")
+    transcriber = Transcriber(phonetic=False)
     audio = load_audio('../data/obama.mp3', 44100)
     audio = audio.unsqueeze(0).unsqueeze(0)
 
     text, logits_btc = (transcriber.transcribe_batch(torch.cat([audio, ], dim=0), 44100))
-    print(text[0])
+    print(text)
     # Now dump the alignment to textgrid, it can be easily viewed via praat.
     import textgrid
     grid = textgrid.TextGrid()
@@ -122,4 +122,3 @@ if __name__ == '__main__':
         char_grid.add(minTime=times[i], maxTime=times[i+1], mark=chars[i])
     grid.append(char_grid)
     grid.write(open("../data/obama.textgrid", "w"))
-
